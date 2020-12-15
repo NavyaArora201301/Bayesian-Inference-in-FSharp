@@ -1,6 +1,6 @@
 # FSharp Advent - 2020: Bayesian Inference in FSharp #
 
-This repository 
+This repository contains the code for my submission for the FSharp Advent calendar for 2020.
 
 ## Bayesian Inference Resources
 
@@ -22,5 +22,4 @@ This repository
 1. https://numerics.mathdotnet.com/Probability.html
 
 ### Pymc Tutorials
-1. 
 1. https://docs.pymc.io/notebooks/stochastic_volatility.html 
