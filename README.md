@@ -22,4 +22,5 @@ This repository
 1. https://numerics.mathdotnet.com/Probability.html
 
 ### Pymc Tutorials
-1. https://colcarroll.github.io/pymc3/notebooks/stochastic_volatility.html 
+1. 
+1. https://docs.pymc.io/notebooks/stochastic_volatility.html 
