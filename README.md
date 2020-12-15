@@ -1,5 +1,7 @@
 # FSharp Advent - 2020: Bayesian Inference in FSharp #
 
+This repository 
+
 ## Bayesian Inference Resources
 
 ### Metropolis-Hastings
@@ -18,3 +20,6 @@
 
 ### FSharp Distributions
 1. https://numerics.mathdotnet.com/Probability.html
+
+### Pymc Tutorials
+1. https://colcarroll.github.io/pymc3/notebooks/stochastic_volatility.html 

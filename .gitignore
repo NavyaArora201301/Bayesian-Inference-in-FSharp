@@ -2,3 +2,4 @@
 .ionide
 symbolCache.db
 .ipynb_checkpoints
+.fake
