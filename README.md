@@ -8,6 +8,8 @@ This repository contains the code for my submission for the FSharp Advent calend
 1. https://stephens999.github.io/fiveMinuteStats/MH_intro.html
 2. https://bookdown.org/rdpeng/advstatcomp/metropolis-hastings.html
 3. https://towardsdatascience.com/bayesian-statistics-metropolis-hastings-from-scratch-in-python-c3b10cc4382d 
+4. http://galton.uchicago.edu/~eichler/stat24600/Handouts/l12.pdf
+5. https://www.jarad.me/courses/stat544/slides/Ch11/Ch11a.pdf
     
 ### Hamiltonian Monte Carlo
 1. https://gregorygundersen.com/blog/2020/07/05/hmc/
@@ -23,3 +25,6 @@ This repository contains the code for my submission for the FSharp Advent calend
 
 ### Pymc Tutorials
 1. https://docs.pymc.io/notebooks/stochastic_volatility.html 
+
+### Bayesian Networks
+1. http://dmg.org/pmml/v4-4/BayesianNetwork.html
