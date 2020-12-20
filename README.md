@@ -10,6 +10,7 @@ This repository contains the code for my submission for the FSharp Advent calend
 3. https://towardsdatascience.com/bayesian-statistics-metropolis-hastings-from-scratch-in-python-c3b10cc4382d 
 4. http://galton.uchicago.edu/~eichler/stat24600/Handouts/l12.pdf
 5. https://www.jarad.me/courses/stat544/slides/Ch11/Ch11a.pdf
+6. https://towardsdatascience.com/from-scratch-bayesian-inference-markov-chain-monte-carlo-and-metropolis-hastings-in-python-ef21a29e25a
     
 ### Hamiltonian Monte Carlo
 1. https://gregorygundersen.com/blog/2020/07/05/hmc/
