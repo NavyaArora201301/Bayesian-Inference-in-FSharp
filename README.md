@@ -1,6 +1,13 @@
 # FSharp Advent - 2020: Bayesian Inference in FSharp #
 
-This repository contains the code for my submission for the FSharp Advent calendar for 2020.
+![Bayes](./Images/BayesTheoremNeon.jpeg)
+
+This repository contains the code for my submission for the FSharp Advent calendar for 2020. My submission involves developing a framework for conducting Bayesian Inference in F#.
+
+## Prerequistes to Further Develop on the Notebook
+- [Jupyter Notebooks](https://jupyter.org/)
+- [F# via .Net Core](https://dotnet.microsoft.com/download)
+- [Dotnet Interactive](https://devblogs.microsoft.com/dotnet/net-interactive-is-here-net-notebooks-preview-2/)
 
 ## Bayesian Inference Resources
 
