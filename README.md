@@ -4,7 +4,7 @@ This repository contains the code for my submission for the FSharp Advent calend
 
 ## Bayesian Inference Resources
 
-One of the best resources for learning Bayesian Statistical Methods is [this](https://www.youtube.com/playlist?list=PLFDbGp5YzjqXQ4oE4w9GVWdiokWB9gEpm) playlist by Ben Lampart in addition to his [book](https://www.amazon.com/Students-Guide-Bayesian-Statistics/dp/1473916364/ref=sr_1_2?dchild=1&hvadid=78340339743585&hvbmt=be&hvdev=c&hvqmt=e&keywords=ben+lambert+bayesian&qid=1608778015&sr=8-2&tag=mh0b-20). A more mathematically involved book is
+One of the best resources for learning Bayesian Statistical Methods is [this](https://www.youtube.com/playlist?list=PLFDbGp5YzjqXQ4oE4w9GVWdiokWB9gEpm) playlist by Ben Lambert in addition to his [book](https://www.amazon.com/Students-Guide-Bayesian-Statistics/dp/1473916364/ref=sr_1_2?dchild=1&hvadid=78340339743585&hvbmt=be&hvdev=c&hvqmt=e&keywords=ben+lambert+bayesian&qid=1608778015&sr=8-2&tag=mh0b-20). A more mathematically involved book is
 [this](https://www.amazon.com/Bayesian-Statistical-Methods-Springer-Statistics/dp/0387922997) one by Peter Hoff.
 
 ### Metropolis-Hastings
