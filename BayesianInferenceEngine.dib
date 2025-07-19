@@ -1,0 +1,447 @@
+#!meta
+
+{"kernelInfo":{"defaultKernelName":"csharp","items":[{"name":"csharp"},{"name":"fsharp","languageName":"F#","aliases":["f#","fs"]},{"name":"html","languageName":"HTML"},{"name":"http","languageName":"HTTP"},{"name":"javascript","languageName":"JavaScript","aliases":["js"]},{"name":"mermaid","languageName":"Mermaid"},{"name":"pwsh","languageName":"PowerShell","aliases":["powershell"]},{"name":"value"}]}}
+
+#!fsharp
+
+#r "nuget: XPlot.Plotly"
+#r "nuget: MathNet.Numerics"
+#r "nuget: Newtonsoft.Json"
+
+// Imports 
+open XPlot.Plotly
+open MathNet.Numerics
+open Newtonsoft.Json
+
+#!fsharp
+
+open MathNet.Numerics.Distributions
+
+type ParsedRandomVariable = 
+    { Name             : string
+      Conditionals     : string list
+      Distribution     : string
+      Parameters       : string list
+      Observed         : string option }
+
+type ParsedBayesianModel = ParsedRandomVariable list
+
+#!fsharp
+
+open System
+
+// Format: RVName [|Conditionals] ~ Distribution(Parameters) [: observed] 
+// [] -> optional
+// NOTE: There can't be any spaces in the distribution parameters.
+let parseLineOfModel (lineInModel : string) : ParsedRandomVariable = 
+ 
+    // Helper fn to split the string based on a variety of type of delimiters.
+    // Resultant type is a list of strings to feed in for the pattern matching.
+    let splitToList (toSplit : string) (delimiters : obj) : string list = 
+        let split = 
+            match delimiters with
+            | :? string        as s   -> toSplit.Split(s, StringSplitOptions.RemoveEmptyEntries) 
+            | :? array<string> as arr -> toSplit.Split(arr, StringSplitOptions.RemoveEmptyEntries) 
+            | :? array<char>   as arr -> toSplit.Split(arr, StringSplitOptions.RemoveEmptyEntries) 
+            | _ -> failwithf "Splitting based on delimiters failed as it is neither a string nor an array of strings: Of Type: %A - %A" (delimiters.GetType()) toSplit
+        
+        Array.toList split
+
+    match splitToList lineInModel " " with
+    | nameAndConditionals :: "~" :: distributionParametersObserved ->
+        // Get the name and conditionals.
+        let splitNameAndConditionals = splitToList nameAndConditionals "|"
+        let name = splitNameAndConditionals.[0]
+        let conditionals = 
+            match splitNameAndConditionals with 
+            | name :: conditionals -> 
+                if conditionals.Length > 0 then splitToList conditionals.[0] ","
+                else []
+            | _ -> failwithf "Pattern not found for RV Name and Conditionals - the format is: RVName|Condtionals: %A" splitNameAndConditionals
+
+        let extractAndGetParameters (distributionNameAndParameters : string) : string * string list = 
+            let splitDistributionAndParameters = splitToList distributionNameAndParameters [| "("; ")" |]
+            (splitDistributionAndParameters.[0], splitToList splitDistributionAndParameters.[1] ",")
+            
+        match distributionParametersObserved with 
+
+        // Case: Without Observations. Example: θ ~ Gamma(a,b)
+        | distributionNameAndParameters when distributionNameAndParameters.Length = 1 ->
+            let extractedDistributionAndParameters = extractAndGetParameters distributionNameAndParameters.[0]
+            { Name             = name; 
+              Conditionals     = conditionals; 
+              Distribution     = (fst extractedDistributionAndParameters).ToLower();
+              Observed         = None; 
+              Parameters       = snd extractedDistributionAndParameters; }
+
+        // Case: With Observations. Example: Y|θ ~ Poisson(θ) : observed
+        | distributionNameAndParameters :: ":" :: observed ->
+            let extractedDistributionAndParameters = extractAndGetParameters distributionNameAndParameters
+            { Name             = name;
+              Conditionals     = conditionals; 
+              Distribution     = (fst extractedDistributionAndParameters).ToLower();
+              Observed         = Some observed.Head; // Only 1 observed list permitted.
+              Parameters       = snd extractedDistributionAndParameters; } 
+
+        // Case: Error.
+        | _ -> failwithf "Pattern not found for the model while parsing the distribution, parameters and optionally, the observed variables: %A" distributionParametersObserved 
+
+    | _ -> failwithf "Pattern not found for the following line in the model - please check the syntax: %A" lineInModel
+
+let parseModel (model : string) : ParsedBayesianModel = 
+    model.Split('\n') 
+    |> Array.map(fun line -> line.Trim()) // Trim each line to remove extra whitespace
+    |> Array.filter(fun line -> not (String.IsNullOrWhiteSpace(line))) // Ignore empty lines
+    |> Array.map(parseLineOfModel)
+    |> Array.toList
+
+// Helper to print out the Parsed Bayesian Model
+let printParsedModel (model : string) : unit = 
+    let parsedModel = parseModel model
+    printfn "Model: %A is represented as %A" model parsedModel
+
+#!fsharp
+
+open System
+open System.Collections.Generic
+open MathNet.Numerics.Distributions
+open Newtonsoft.Json
+
+type Observed = float list
+
+type ParameterList = 
+    { Observed : float list; Parameters : Dictionary<string, float> } 
+
+let deserializeParameters (paramsAsString : string) : ParameterList = 
+    JsonConvert.DeserializeObject<ParameterList>(paramsAsString)
+
+#!fsharp
+
+type DistributionType = 
+    | Continuous
+    | Discrete
+
+type Parameter     = float
+type DiscreteInput = int
+type Input         = float
+
+type DensityType = 
+    | OneParameter         of (Parameter * Input -> float) 
+    | OneParameterDiscrete of (Parameter * DiscreteInput -> float)
+    | TwoParameter         of (Parameter * Parameter * Input -> float)
+
+type DistributionInfo = { RVName             : string
+                          DistributionType   : DistributionType 
+                          DistributionName   : string 
+                          Parameters         : float list
+                          Density            : DensityType } with
+                          
+    static member Create (item : ParsedRandomVariable) 
+                         (parameterList : ParameterList) : DistributionInfo = 
+        // I know this is ugly but this functionality assumes the user enters the 
+        // parameters in the order that's expected by the MathNet Numerics Library. 
+        // Grab the parameters associated with this Random Variable.
+        let rvParameters = 
+            item.Parameters
+            |> List.filter(parameterList.Parameters.ContainsKey) 
+            |> List.map(fun item -> parameterList.Parameters.[item])
+
+        // Extract Distribution Associated with the Parsed Random Variable.
+        match item.Distribution with
+            // 1 Parameter Distributions 
+            | "exponential" -> 
+                { RVName           = item.Name;
+                  DistributionName = item.Distribution;
+                  Parameters       = rvParameters;
+                  DistributionType = DistributionType.Continuous;
+                  Density          = OneParameter Exponential.PDF }
+            | "poisson" ->
+                { RVName           = item.Name;
+                  DistributionName = item.Distribution;
+                  Parameters       = rvParameters;
+                  DistributionType = DistributionType.Discrete;
+                  Density          = OneParameterDiscrete Poisson.PMF } 
+            // 2 Parameter Distributions 
+            | "normal" ->
+                { RVName           = item.Name;
+                  DistributionName = item.Distribution;
+                  Parameters       = rvParameters;
+                  DistributionType = DistributionType.Continuous;
+                  Density          = TwoParameter Normal.PDF }
+            | "gamma" ->
+                { RVName           = item.Name;
+                  DistributionName = item.Distribution;
+                  Parameters       = rvParameters;
+                  DistributionType = DistributionType.Continuous;
+                  Density          = TwoParameter Gamma.PDF }
+            | "beta" ->
+                { RVName           = item.Name;
+                  DistributionName = item.Distribution;
+                  Parameters       = rvParameters;
+                  DistributionType = DistributionType.Continuous;
+                  Density          = TwoParameter Beta.PDF }
+            | "continuousuniform" ->
+                { RVName           = item.Name;
+                  DistributionName = item.Distribution;
+                  Parameters       = rvParameters;
+                  DistributionType = DistributionType.Continuous;
+                  Density          = TwoParameter ContinuousUniform.PDF }
+            // Failure Case
+            | _ -> failwithf "Distribution not registered: %A" item.Distribution                      
+                          
+    member this.ComputeOneParameterPDF (parameter : float) (input : float) : float =
+        match this.Density with
+        | OneParameter pdf -> pdf(parameter,input)
+        | _ -> failwithf "Incorrect usage of function with a non One Parameter Density Type. Density given: %A" this.Density 
+    member this.ComputeOneParameterDiscretePMF (parameter : float) (input : int) : float =
+        match this.Density with
+        | OneParameterDiscrete pmf -> pmf(parameter,input)
+        | _ -> failwithf "Incorrect usage of function with a non One Parameter Discrete Density Type. Density given: %A" this.Density 
+    member this.ComputeTwoParameterPDF (parameter1 : float) (parameter2 : float) (input : float) : float =
+        match this.Density with
+        | TwoParameter pdf -> pdf(parameter1, parameter2, input)
+        | _ -> failwithf "Incorrect usage of function with a non Two Parameter Density Type. Density given: %A" this.Density
+
+#!fsharp
+
+let getDistributionInfoForModel(model : string) (parameterList : string) : DistributionInfo list = 
+    let parsedModel   = parseModel model
+    let parameterList = deserializeParameters parameterList 
+    parsedModel
+    |> List.map(fun x -> DistributionInfo.Create x parameterList)
+
+let getDensityOrProbabilityForModel (model : string) 
+                                    (parameterList : string) 
+                                    (data : float seq) : IDictionary<string, float seq> = 
+    getDistributionInfoForModel model parameterList
+    |> List.map(fun (e : DistributionInfo) -> 
+        match e.Density with
+        | OneParameter p ->
+            let param   = List.exactlyOne e.Parameters 
+            let results = data |> Seq.map(fun d -> e.ComputeOneParameterPDF param d)
+            e.RVName, results
+        | OneParameterDiscrete p ->
+            let param   = List.exactlyOne e.Parameters 
+            let results = data |> Seq.map(fun d -> e.ComputeOneParameterDiscretePMF param (int d))
+            e.RVName, results
+        | TwoParameter p ->
+            let p2 : float list = e.Parameters |> List.take 2
+            let results = data |> Seq.map(fun d -> e.ComputeTwoParameterPDF p2.[0] p2.[1] d)
+            e.RVName, results)
+    |> dict
+
+#!fsharp
+
+type BayesianNodeTypeInfo =
+    | Observed of float list 
+    | NonObserved
+
+type BayesianNode = 
+    { Name                 : string
+      NodeType             : BayesianNodeTypeInfo 
+      DistributionInfo     : DistributionInfo
+      ParsedRandomVariable : ParsedRandomVariable } with
+
+    static member Create(parsedRandomVariable : ParsedRandomVariable)
+                        (parameterList : ParameterList) =
+
+        let nodeType : BayesianNodeTypeInfo =
+            match parsedRandomVariable.Observed with
+            | Some _ -> BayesianNodeTypeInfo.Observed parameterList.Observed
+            | None   -> BayesianNodeTypeInfo.NonObserved
+        { Name                 = parsedRandomVariable.Name;
+          NodeType             = nodeType;
+          DistributionInfo     = DistributionInfo.Create parsedRandomVariable parameterList;
+          ParsedRandomVariable = parsedRandomVariable; }
+
+    member this.GetDependents (parsedBayesianModel : ParsedBayesianModel) : ParsedRandomVariable list =
+        parsedBayesianModel 
+        |> List.filter(fun x -> x.Conditionals |> List.contains(this.Name))
+
+#!fsharp
+
+// Only to be used for a model with 2 nodes 
+// i.e. one for the prior and one for the likelihood.
+type SimpleBayesianNetworkModel = 
+  { Name       : string
+    Nodes      : IDictionary<string, BayesianNode>
+    Prior      : BayesianNode
+    Likelihood : BayesianNode } with
+
+    member this.GetPriorProbability (input : float) : float = 
+      let distributionInfo = this.Prior.DistributionInfo 
+      match distributionInfo.Density with
+      | OneParameter p ->
+          let param = List.exactlyOne distributionInfo.Parameters 
+          distributionInfo.ComputeOneParameterPDF param input 
+      | OneParameterDiscrete p ->
+          let param   = List.exactlyOne distributionInfo.Parameters 
+          distributionInfo.ComputeOneParameterDiscretePMF param (int input)
+      | TwoParameter p ->
+          let p2 : float list = distributionInfo.Parameters |> List.take 2
+          distributionInfo.ComputeTwoParameterPDF p2.[0] p2.[1] input
+
+    member this.GetLikelihoodProbability (prior : float) : float = 
+        let distributionInfo = this.Likelihood.DistributionInfo
+        let observed         = match this.Likelihood.NodeType with
+                               | Observed l -> l
+                               | _ -> failwithf "Incorrectly constructed Simple Network Model. %A" this 
+        let density = 
+          match distributionInfo.Density with
+          | OneParameter p -> 
+              observed |> List.map(fun d -> distributionInfo.ComputeOneParameterPDF prior d)
+          | OneParameterDiscrete p ->
+              observed |> List.map(fun d -> distributionInfo.ComputeOneParameterDiscretePMF prior (int (Math.Ceiling d)))
+          | TwoParameter p ->
+              let p : float = distributionInfo.Parameters |> List.exactlyOne 
+              observed |> List.map(fun d -> distributionInfo.ComputeTwoParameterPDF prior p d)
+        density
+        |> List.fold (*) 1.0
+
+    member this.GetPosteriorWithoutScalingFactor (input: float) : float = 
+      let priorPdf      = this.GetPriorProbability input 
+      let likelihoodPdf = this.GetLikelihoodProbability priorPdf
+      priorPdf * likelihoodPdf
+
+    static member Construct (name : string)
+                            (model : ParsedBayesianModel)
+                            (parameterList : ParameterList) : SimpleBayesianNetworkModel = 
+
+        // Construct all the modes of the model.
+        let allNodes : (string * BayesianNode) list =
+            model
+            |> List.map(fun m -> m.Name, BayesianNode.Create m parameterList)
+
+        let prior : BayesianNode =  
+            allNodes
+            |> List.filter(fun (_,m) -> m.NodeType = BayesianNodeTypeInfo.NonObserved) 
+            |> List.map(fun (_,m) -> m)
+            |> List.exactlyOne
+
+        let likelihood : BayesianNode =  
+            allNodes
+            |> List.filter(fun (_,m) -> m.NodeType <> BayesianNodeTypeInfo.NonObserved)
+            |> List.map(fun (_,m) -> m)
+            |> List.exactlyOne
+
+        { Name       = name; 
+          Nodes      = dict allNodes; 
+          Prior      = prior;
+          Likelihood = likelihood; } 
+
+#!fsharp
+
+type ConvergenceCriteria = 
+    | IterativeConvergence of int // Number of Iterations
+
+type ProposalDistribution =
+    | Normal of float  // Normal( current, delta )
+    | ContinuousUniform of float // ContinuousUniform( current - delta, current + delta )
+    | PositiveContinuousUniform of float // ( x ~ Uniform( current - delta, current + delta ) if x <= 0 then 0.1 else x )
+
+type MCMCInferenceStep = 
+    | SymmetricMetropolisHastings of ProposalDistribution * float
+
+type MCMCChain =
+    { Id             : int
+      AcceptanceRate : float // # of Acceptances / Total # of Chain Items
+      StepValues     : float seq }
+
+type MCMCRequest = 
+    { StepFunction         : MCMCInferenceStep
+      ConvergenceCriteria  : ConvergenceCriteria
+      BurnInIterationsPct  : float 
+      Chains               : int 
+      PrintDebug           : bool }
+
+type MCMCResult =
+    { Chains         : MCMCChain seq 
+      MCMCRequest    : MCMCRequest }
+
+#!fsharp
+
+open System
+open MathNet.Numerics.Distributions
+open XPlot.Plotly
+
+type AcceptanceRejection =
+    | Acceptance of float // Acceptance of the Proposal
+    | Rejection  of float // Rejection of the Proposal
+
+let doSymmetricMetropolisHastings (request : MCMCRequest) 
+                                  (iterations : int)
+                                  (proposalDistribution : ProposalDistribution)
+                                  (initialValue : float)
+                                  (simpleBayesianModel : SimpleBayesianNetworkModel) : MCMCResult =
+
+    let getChain (id : int) (request : MCMCRequest) 
+                 (iterations : int) (simpleBayesianModel : SimpleBayesianNetworkModel) : MCMCChain =
+
+        let burnin         = int (Math.Ceiling(request.BurnInIterationsPct / 100. * float iterations))
+        let zeroOneUniform = ContinuousUniform()
+
+        let mutable current = simpleBayesianModel.GetPosteriorWithoutScalingFactor initialValue
+
+        let matchedProposalDistribution (input : float) :  float =
+            match proposalDistribution with 
+            | Normal delta            -> MathNet.Numerics.Distributions.Normal.Sample(input, delta)
+            | ContinuousUniform delta -> MathNet.Numerics.Distributions.ContinuousUniform.Sample(input - delta, input + delta)
+            | PositiveContinuousUniform delta -> 
+                let u = MathNet.Numerics.Distributions.ContinuousUniform.Sample(input - delta, input + delta)
+                if u <= 0. then input + 0.1 else u
+
+        let step (iteration : int) : AcceptanceRejection =
+            let proposed           = matchedProposalDistribution current
+            let currentProbability = simpleBayesianModel.GetPosteriorWithoutScalingFactor current
+            let proposedProbabilty = simpleBayesianModel.GetPosteriorWithoutScalingFactor proposed
+            let acceptanceRatio    = Math.Min(currentProbability / proposedProbabilty, 1.)
+            let uniformDraw        = zeroOneUniform.Sample()
+
+            if request.PrintDebug then 
+                printfn "Chain: %A Iteration: %A - Current Probability: %A | Proposed Probability: %A | AcceptanceRatio: %A | Uniform Draw: %A | Current: %A | Proposed: %A" 
+                    id iteration currentProbability proposedProbabilty acceptanceRatio uniformDraw current proposed
+
+            if uniformDraw < acceptanceRatio then (current <- proposed; Acceptance proposed) 
+            else Rejection current
+    
+        let stepResults : AcceptanceRejection seq =
+            seq {1..iterations}
+            |> Seq.map step
+            |> Seq.skip burnin
+
+        let getAcceptanceRateAndStepValues : float * float seq =
+
+            // Compute the Acceptance Rate.
+            let acceptanceRate : float = 
+                let totalBurninWithoutBurnin : float = float (Seq.length stepResults)
+                let totalNumberOfAcceptances : float = 
+                    stepResults 
+                    |> Seq.filter(fun x -> 
+                        match x with
+                        | Acceptance x -> true
+                        | _ -> false)
+                    |> Seq.length
+                    |> float
+                totalNumberOfAcceptances / totalBurninWithoutBurnin
+
+            // Grab the Step Values that'll approximate the posterior.
+            let stepValues =
+                stepResults |> Seq.map(fun s ->
+                    match s with
+                    | Acceptance v -> v
+                    | Rejection v -> v)
+
+            acceptanceRate, stepValues
+
+        let acceptanceRate, stepValues = getAcceptanceRateAndStepValues 
+
+        { Id             = id
+          AcceptanceRate = acceptanceRate
+          StepValues     = stepValues} 
+
+    let chains : MCMCChain seq =
+        seq {1..request.Chains}
+        |> Seq.map(fun id ->  getChain id request iterations simpleBayesianModel)
+
+    { Chains      = chains
+      MCMCRequest =  request }
